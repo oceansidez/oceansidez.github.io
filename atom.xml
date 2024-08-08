@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+    <id>https://oceansidez.github.io</id>
+    <title>Gridea</title>
+    <updated>2024-08-08T05:50:48.544Z</updated>
+    <generator>https://github.com/jpmonette/feed</generator>
+    <link rel="alternate" href="https://oceansidez.github.io"/>
+    <link rel="self" href="https://oceansidez.github.io/atom.xml"/>
+    <subtitle>温故而知新</subtitle>
+    <logo>https://oceansidez.github.io/images/avatar.png</logo>
+    <icon>https://oceansidez.github.io/favicon.ico</icon>
+    <rights>All rights reserved 2024, Gridea</rights>
+    <entry>
+        <title type="html"><![CDATA[test2]]></title>
+        <id>https://oceansidez.github.io/post/test2/</id>
+        <link href="https://oceansidez.github.io/post/test2/">
+        </link>
+        <updated>2024-08-08T03:30:20.000Z</updated>
+        <content type="html"><![CDATA[<h1 id="todo-文件压缩为zip并进行下载">todo-文件压缩为zip并进行下载</h1>
+<ol>
+<li><strong>根据业务id查询关联的文件，传入下载的名称(不包含后缀)和对应的文件列表</strong></li>
+</ol>
+<pre><code class="language-java">public void downLoadZip(HttpServletResponse response, String id) {
+        TReimbursement reimbursement = get(id);
+        SysFile fileParam = new SysFile();
+        fileParam.setBusinessId(id);
+        List&lt;SysFile&gt; fileList = sysFileService.findList(fileParam);
+        // 查询所有明细的附件
+        List&lt;TReimbursementdetail&gt; detailList = tReimbursementdetailDao.findList(new TReimbursementdetail(new TReimbursement(id)));
+        detailList.forEach(detail -&gt; {
+            SysFile detailFileParam = new SysFile();
+            detailFileParam.setBusinessId(detail.getId());
+            fileList.addAll(sysFileService.findList(detailFileParam));
+        });
+        String fileName = StringUtils.trim(reimbursement.getCreateBy().getName() + &quot;_&quot; + reimbursement.getReimbursementCode() + &quot;_&quot; + reimbursement.getTotalamount());
+        Map&lt;String, List&lt;SysFile&gt;&gt; map = new HashMap&lt;&gt;();
+        map.put(fileName, fileList);
+        sysFileService.downloadZip(response, fileName, map);
+    }
+</code></pre>
+<ol start="2">
+<li><strong>设置响应方式和响应头(用于下载时的文件名展示)</strong></li>
+</ol>
+<blockquote>
+<ul>
+<li>​<code>response.setHeader(&quot;Content-Disposition&quot;, &quot;attachment;filename*=utf-8''&quot; + URLEncoder.encode(&quot;硬件设备类费用模板.xlsx&quot;, &quot;UTF-8&quot;));</code>​</li>
+<li><code>attachment</code>​：指示浏览器将内容作为附件处理，触发下载而不是直接显示在浏览器中。</li>
+<li>​<code>filename*=utf-8'zh_cn'</code>​：用于指定文件名的编码格式和语言。<code>utf-8</code>​ 表示文件名使用 UTF-8 编码，<code>zh_cn</code>​ 表示文件名的语言是简体中文。</li>
+<li>​<code>downloadName</code>​：实际的文件名。</li>
+</ul>
+</blockquote>
+<pre><code class="language-java">public void downloadZip(HttpServletResponse response, String fileName, Map&lt;String, List&lt;SysFile&gt;&gt; files) {
+        OutputStream outputStream = null;
+        ZipOutputStream zos = null;
+        try {
+            String downloadName = fileName + &quot;.zip&quot;;
+            downloadName = URLEncoder.encode(downloadName, &quot;UTF-8&quot;);
+            response.setContentType(&quot;multipart/form-data&quot;);
+            response.setHeader(&quot;Content-Disposition&quot;, &quot;attachment;filename*=utf-8'zh_cn'&quot; + downloadName);
+            outputStream = response.getOutputStream();
+            zos = new ZipOutputStream(outputStream);
+            // 将文件流写入zip中
+            downloadToLocal(zos, files);
+        } catch (IOException e) {
+            logger.error(&quot;批量下载附件失败，processInstanceId=[{}],错误信息=[{}]&quot;, fileName, e);
+        } finally {
+            if (zos != null) {
+                try {
+                    zos.close();
+                } catch (Exception e2) {
+                    logger.info(&quot;关闭输入流时出现错误&quot;, e2);
+                }
+            }
+            if (outputStream != null) {
+                try {
+                    outputStream.close();
+                } catch (Exception e2) {
+                    logger.info(&quot;关闭输入流时出现错误&quot;, e2);
+                }
+            }
+        }
+    }
+</code></pre>
+<ol start="3">
+<li>‍</li>
+</ol>
+<pre><code class="language-java">private void downloadToLocal(ZipOutputStream zos, Map&lt;String, List&lt;SysFile&gt;&gt; files) {
+        for (String key : files.keySet()) {
+            for (SysFile sysFile : files.get(key)) {
+                String filePath = Encodes.urlDecode(sysFile.getFilePath());
+                File file = new File(filePath);
+                InputStream is = null;
+                BufferedInputStream in = null;
+                byte[] buffer = new byte[1024];
+                int len;
+                //创建zip实体（一个文件对应一个ZipEntry）
+                ZipEntry entry = new ZipEntry(key + File.separator + sysFile.getFileName());
+                try {
+                    in = new BufferedInputStream(new FileInputStream(file));
+                    zos.putNextEntry(entry);
+                    //文件流循环写入ZipOutputStream
+                    while ((len = in.read(buffer)) != -1) {
+                        zos.write(buffer, 0, len);
+                    }
+                } catch (Exception e) {
+                    logger.info(&quot;批量下载文件出错&quot;, e);
+                } finally {
+                    if (entry != null) {
+                        try {
+                            zos.closeEntry();
+                        } catch (Exception e2) {
+                            logger.info(&quot;批量下载文件--实体关闭失败&quot;, e2);
+                        }
+                    }
+                    if (in != null) {
+                        try {
+                            in.close();
+                        } catch (Exception e2) {
+                            logger.error(&quot;批量下载文件--文件输入流关闭失败&quot;, e2);
+                        }
+                    }
+                    if (is != null) {
+                        try {
+                            is.close();
+                        } catch (Exception e) {
+                            logger.info(&quot;批量下载文件--输入缓冲流关闭失败&quot;, e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+</code></pre>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[Test]]></title>
+        <id>https://oceansidez.github.io/post/test/</id>
+        <link href="https://oceansidez.github.io/post/test/">
+        </link>
+        <updated>2024-08-08T03:26:33.000Z</updated>
+        <content type="html"><![CDATA[<h1 id="父子级关系页面之间拿数据js">父子级关系页面之间拿数据(js)</h1>
+<blockquote>
+<ol>
+<li>在一个父页面中拿到弹窗子页面的节点值,或者希望操作子页面方法等等...</li>
+<li>在弹窗子页面中拿到父页面的值或者调用方法</li>
+</ol>
+</blockquote>
+<h1 id="父页面中拿子子页面的对象">父页面中拿子子页面的对象</h1>
+<p><strong>如在layui中需要执行子页面中的方法 checkData：</strong></p>
+<blockquote>
+<p>通过<code>$(layero).find(&quot;iframe&quot;)[0].contentWindow</code>​为找到页面中所有的<code>iframe</code>​标签中的第一个，并获取其中的<code>contentWindow</code>​属性（上下文对相当于windown对象），可以通过这个属性访问嵌套网页中的<code>window</code>​对象。可以<code>childWindow.document.getElementById('childDiv') </code>​拿到和操作子页面数据</p>
+<p>​<code>typeof</code>​ 获取类型</p>
+</blockquote>
+<pre><code class="language-js">function dofailBonus(bonusId) {
+            top.layer.open({
+                maxmin: true,
+                type: 2,
+                area: ['960px', '600px'],
+                content: &quot;${ctx}/bonus/undertakebnous/tUndertakeBonusDofail/form?bonusId=&quot; + bonusId,
+                title: &quot;奖金作废&quot;,
+                btn: [&quot;送审&quot;, &quot;关闭&quot;],
+                yes: function (index, layero) {
+                    if (typeof $(layero).find(&quot;iframe&quot;)[0].contentWindow.checkData == 'function') {
+                        var result = $(layero).find(&quot;iframe&quot;)[0].contentWindow.checkData();
+                        if (result.code == 'error') {
+                            top.layer.msg(result.msg, {icon: 1, time: 3000});
+                            return;
+                        }
+                    }
+                    if (typeof $(layero).find(&quot;iframe&quot;)[0].contentWindow.callBackFun == 'function') {
+                        if($(layero).find(&quot;iframe&quot;)[0].contentWindow.callBackFun()) {
+                            top.layer.close(index);
+                            setTimeout('refreshPage()', 1000);
+                        }
+                    }
+                }
+            });
+        }
+</code></pre>
+<h1 id="子页面中拿父页面对象">子页面中拿父页面对象</h1>
+<ul>
+<li>
+<p><strong>访问父页面的window对象</strong>:</p>
+<pre><code class="language-javascript">var parentWindow = window.parent;
+</code></pre>
+</li>
+<li>
+<p><strong>访问父页面的document对象</strong>:</p>
+<pre><code class="language-javascript">var parentDocument = window.parent.document;
+</code></pre>
+</li>
+<li>
+<p><strong>调用父页面的函数</strong>:</p>
+<pre><code class="language-javascript">window.parent.someFunctionInParent();
+</code></pre>
+</li>
+<li>
+<p><strong>操作父页面中的元素</strong>:</p>
+<pre><code class="language-javascript">var parentElement = window.parent.document.getElementById('someElementId');
+parentElement.style.display = 'none';
+</code></pre>
+</li>
+</ul>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[Hello Gridea]]></title>
+        <id>https://oceansidez.github.io/post/hello-gridea/</id>
+        <link href="https://oceansidez.github.io/post/hello-gridea/">
+        </link>
+        <updated>2018-12-11T16:00:00.000Z</updated>
+        <summary type="html"><![CDATA[<p>👏  欢迎使用 <strong>Gridea</strong> ！<br>
+✍️  <strong>Gridea</strong> 一个静态博客写作客户端。你可以用它来记录你的生活、心情、知识、笔记、创意... ...</p>
+]]></summary>
+        <content type="html"><![CDATA[<p>👏  欢迎使用 <strong>Gridea</strong> ！<br>
+✍️  <strong>Gridea</strong> 一个静态博客写作客户端。你可以用它来记录你的生活、心情、知识、笔记、创意... ...</p>
+<!-- more -->
+<p><a href="https://github.com/getgridea/gridea">Github</a><br>
+<a href="https://gridea.dev/">Gridea 主页</a><br>
+<a href="https://fehey.com/">示例网站</a></p>
+<h2 id="特性">特性👇</h2>
+<p>📝  你可以使用最酷的 <strong>Markdown</strong> 语法，进行快速创作</p>
+<p>🌉  你可以给文章配上精美的封面图和在文章任意位置插入图片</p>
+<p>🏷️  你可以对文章进行标签分组</p>
+<p>📋  你可以自定义菜单，甚至可以创建外部链接菜单</p>
+<p>💻  你可以在 <strong>Windows</strong>，<strong>MacOS</strong> 或 <strong>Linux</strong> 设备上使用此客户端</p>
+<p>🌎  你可以使用 <strong>𝖦𝗂𝗍𝗁𝗎𝖻 𝖯𝖺𝗀𝖾𝗌</strong> 或 <strong>Coding Pages</strong> 向世界展示，未来将支持更多平台</p>
+<p>💬  你可以进行简单的配置，接入 <a href="https://github.com/gitalk/gitalk">Gitalk</a> 或 <a href="https://github.com/SukkaW/DisqusJS">DisqusJS</a> 评论系统</p>
+<p>🇬🇧  你可以使用<strong>中文简体</strong>或<strong>英语</strong></p>
+<p>🌁  你可以任意使用应用内默认主题或任意第三方主题，强大的主题自定义能力</p>
+<p>🖥  你可以自定义源文件夹，利用 OneDrive、百度网盘、iCloud、Dropbox 等进行多设备同步</p>
+<p>🌱 当然 <strong>Gridea</strong> 还很年轻，有很多不足，但请相信，它会不停向前 🏃</p>
+<p>未来，它一定会成为你离不开的伙伴</p>
+<p>尽情发挥你的才华吧！</p>
+<p>😘 Enjoy~</p>
+]]></content>
+    </entry>
+</feed>
